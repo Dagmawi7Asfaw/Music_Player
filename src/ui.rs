@@ -13,6 +13,7 @@ pub struct MusicPlayerUI {
     is_playing: bool,
     is_paused: bool,
     demo_songs: Vec<Song>,
+    selected_songs: Vec<usize>, // Multiple selection support
 }
 
 impl MusicPlayerUI {
@@ -23,6 +24,7 @@ impl MusicPlayerUI {
             is_playing: false,
             is_paused: false,
             demo_songs: Vec::new(), // Start with empty playlist
+            selected_songs: Vec::new(),
         }
     }
 
@@ -58,11 +60,30 @@ impl MusicPlayerUI {
     fn render_playlist_panel(&mut self, ui: &mut Ui) {
         ui.heading("Playlist");
         ui.separator();
+        
+        // Show selection info
+        if !self.selected_songs.is_empty() {
+            ui.label(format!("Selected: {} songs", self.selected_songs.len()));
+        }
+        
         ScrollArea::vertical().max_height(500.0).show(ui, |ui| {
             for (i, song) in self.demo_songs.iter().enumerate() {
-                let selected = self.selected_song_index == Some(i);
+                let selected = self.selected_songs.contains(&i);
                 if ui.selectable_label(selected, format!("{} - {}", song.title, song.artist)).clicked() {
-                    self.selected_song_index = Some(i);
+                    // Handle selection (single click for single selection, Ctrl+click for multiple)
+                    if ui.input(|i| i.modifiers.ctrl) {
+                        // Ctrl+click for multiple selection
+                        if selected {
+                            self.selected_songs.retain(|&x| x != i);
+                        } else {
+                            self.selected_songs.push(i);
+                        }
+                    } else {
+                        // Single click for single selection
+                        self.selected_songs.clear();
+                        self.selected_songs.push(i);
+                        self.selected_song_index = Some(i);
+                    }
                 }
             }
         });
@@ -89,11 +110,11 @@ impl MusicPlayerUI {
                     self.add_folder_songs(&folder_path);
                 }
             }
-            if ui.button("Remove Song").clicked() {
-                if let Some(idx) = self.selected_song_index {
-                    self.demo_songs.remove(idx);
-                    self.selected_song_index = None;
-                }
+            if ui.button("Remove Selected").clicked() {
+                self.remove_selected_songs();
+            }
+            if ui.button("Clear All").clicked() {
+                self.clear_all_songs();
             }
         });
     }
@@ -305,5 +326,26 @@ impl MusicPlayerUI {
             added_songs.push(song);
         }
         self.demo_songs.extend(added_songs);
+    }
+
+    fn remove_selected_songs(&mut self) {
+        if self.selected_songs.is_empty() {
+            return;
+        }
+        let mut new_songs = Vec::new();
+        for (i, song) in self.demo_songs.iter().enumerate() {
+            if !self.selected_songs.contains(&i) {
+                new_songs.push(song.clone());
+            }
+        }
+        self.demo_songs = new_songs;
+        self.selected_songs.clear();
+        self.selected_song_index = None;
+    }
+
+    fn clear_all_songs(&mut self) {
+        self.demo_songs.clear();
+        self.selected_songs.clear();
+        self.selected_song_index = None;
     }
 } 
