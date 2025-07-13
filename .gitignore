@@ -42,3 +42,6 @@ build/
 *.dylib
 *.exe
 music_playlist 
+
+# Ignore the music folder containing user audio files
+music/ 
