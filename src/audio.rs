@@ -108,4 +108,12 @@ impl AudioManager {
             Duration::ZERO
         }
     }
+
+    pub fn is_finished(&self) -> bool {
+        if let Some(sink) = &self.sink {
+            sink.len() == 0 && !sink.is_paused()
+        } else {
+            false
+        }
+    }
 } 

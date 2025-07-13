@@ -47,6 +47,11 @@ impl MusicPlayerUI {
         if let Ok(manager) = audio_manager.try_lock() {
             self.is_playing = manager.is_playing();
             self.is_paused = manager.is_paused();
+            
+            // Check if current song has finished and auto-advance
+            if self.is_playing && !self.is_paused && manager.is_finished() {
+                self.auto_advance_to_next_song(audio_manager.clone());
+            }
         }
     }
 
@@ -245,6 +250,35 @@ impl MusicPlayerUI {
                     self.is_playing = true;
                     self.is_paused = false;
                 }
+            }
+        }
+    }
+
+    fn auto_advance_to_next_song(&mut self, audio_manager: Arc<Mutex<AudioManager>>) {
+        if self.demo_songs.is_empty() {
+            return;
+        }
+
+        // If no song is selected, select the first song
+        if self.selected_song_index.is_none() {
+            self.selected_song_index = Some(0);
+            self.play_selected_song(audio_manager);
+            return;
+        }
+
+        let current_index = self.selected_song_index.unwrap();
+        
+        // Check if there's a next song
+        if current_index < self.demo_songs.len() - 1 {
+            // Move to next song
+            self.selected_song_index = Some(current_index + 1);
+            self.play_selected_song(audio_manager);
+        } else {
+            // No more songs, stop playback
+            if let Ok(mut manager) = audio_manager.try_lock() {
+                manager.stop();
+                self.is_playing = false;
+                self.is_paused = false;
             }
         }
     }
