@@ -1,6 +1,6 @@
 use crate::audio::AudioManager;
 use crate::playlist::{PlaylistManager, Song};
-use egui::{Context, ScrollArea, Ui};
+use egui::{Context, ScrollArea, Ui, RichText, Color32, FontId, Visuals, style::Margin};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use rfd::FileDialog;
@@ -41,9 +41,31 @@ impl MusicPlayerUI {
         audio_manager: Arc<Mutex<AudioManager>>,
         _playlist_manager: Arc<Mutex<PlaylistManager>>,
     ) {
+        // Apply a professional dark theme with accent color
+        let mut style = (*ctx.style()).clone();
+        style.visuals = Visuals::dark();
+        style.visuals.widgets.active.bg_fill = Color32::from_rgb(40, 80, 160); // accent blue
+        style.visuals.widgets.hovered.bg_fill = Color32::from_rgb(60, 100, 200);
+        style.visuals.widgets.inactive.bg_fill = Color32::from_rgb(30, 30, 40);
+        style.visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(24, 24, 28);
+        style.visuals.selection.bg_fill = Color32::from_rgb(40, 80, 160);
+        style.visuals.selection.stroke = egui::Stroke::new(2.0, Color32::from_rgb(80, 180, 255));
+        style.spacing.item_spacing = egui::vec2(12.0, 8.0);
+        style.spacing.button_padding = egui::vec2(16.0, 8.0);
+        style.visuals.window_rounding = 8.0.into();
+        style.visuals.window_shadow = egui::epaint::Shadow::big_dark();
+        ctx.set_style(style);
+
+        // Always update playback state and auto-advance
         self.update_playback_state(&audio_manager);
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("🎵 Rust Music Player");
+
+        egui::CentralPanel::default().frame(
+            egui::Frame::none().fill(Color32::from_rgb(24, 24, 28)).inner_margin(Margin::same(16.0))
+        ).show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.heading(RichText::new("🎵 Rust Music Player").font(FontId::proportional(32.0)).color(Color32::from_rgb(80, 180, 255)));
+            });
+            ui.add_space(8.0);
             ui.separator();
             ui.columns(2, |columns| {
                 self.render_playlist_panel(&mut columns[0]);
@@ -71,146 +93,136 @@ impl MusicPlayerUI {
     }
 
     fn render_playlist_panel(&mut self, ui: &mut Ui) {
-        ui.heading("Playlist");
-        ui.separator();
-        
-        // Show selection info
-        if !self.selected_songs.is_empty() {
-            ui.label(format!("Selected: {} songs", self.selected_songs.len()));
-        }
-        
-        ScrollArea::vertical().max_height(500.0).show(ui, |ui| {
-            for (i, song) in self.demo_songs.iter().enumerate() {
-                let selected = self.selected_songs.contains(&i);
-                if ui.selectable_label(selected, format!("{} - {}", song.title, song.artist)).clicked() {
-                    // Handle selection (single click for single selection, Ctrl+click for multiple)
-                    if ui.input(|i| i.modifiers.ctrl) {
-                        // Ctrl+click for multiple selection
-                        if selected {
-                            self.selected_songs.retain(|&x| x != i);
+        ui.group(|ui| {
+            ui.set_width(ui.available_width());
+            ui.heading(RichText::new("Playlist").font(FontId::proportional(24.0)).color(Color32::WHITE));
+            ui.separator();
+            if !self.selected_songs.is_empty() {
+                ui.label(RichText::new(format!("Selected: {} songs", self.selected_songs.len())).color(Color32::from_rgb(80, 180, 255)));
+            }
+            ScrollArea::vertical().max_height(600.0).show(ui, |ui| {
+                for (i, song) in self.demo_songs.iter().enumerate() {
+                    let selected = self.selected_songs.contains(&i);
+                    let label = RichText::new(format!("{} - {}", song.title, song.artist))
+                        .font(FontId::proportional(18.0))
+                        .color(if selected { Color32::from_rgb(80, 180, 255) } else { Color32::WHITE });
+                    let resp = ui.selectable_label(selected, label).on_hover_text("Click to select. Ctrl+Click for multi-select.");
+                    if resp.clicked() {
+                        if ui.input(|i| i.modifiers.ctrl) {
+                            if selected {
+                                self.selected_songs.retain(|&x| x != i);
+                            } else {
+                                self.selected_songs.push(i);
+                            }
                         } else {
+                            self.selected_songs.clear();
                             self.selected_songs.push(i);
+                            self.selected_song_index = Some(i);
                         }
-                    } else {
-                        // Single click for single selection
-                        self.selected_songs.clear();
-                        self.selected_songs.push(i);
-                        self.selected_song_index = Some(i);
                     }
                 }
-            }
-        });
-        ui.separator();
-        ui.horizontal(|ui| {
-            if ui.button("Add Song").clicked() {
-                if let Some(path) = FileDialog::new()
-                    .add_filter("Audio", &["mp3", "wav", "flac", "ogg", "m4a"])
-                    .pick_file() {
-                    let file_path = path.display().to_string();
-                    let title = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "Unknown".to_string());
-                    let song = Song {
-                        title,
-                        artist: "Unknown".to_string(),
-                        file_path,
-                        duration: None,
-                    };
-                    self.demo_songs.push(song);
+            });
+            ui.separator();
+            ui.horizontal(|ui| {
+                if ui.add(egui::Button::new(RichText::new("Add Song").font(FontId::proportional(16.0)))).clicked() {
+                    if let Some(path) = FileDialog::new()
+                        .add_filter("Audio", &["mp3", "wav", "flac", "ogg", "m4a"])
+                        .pick_file() {
+                        let file_path = path.display().to_string();
+                        let title = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "Unknown".to_string());
+                        let song = Song {
+                            title,
+                            artist: "Unknown".to_string(),
+                            file_path,
+                            duration: None,
+                        };
+                        self.demo_songs.push(song);
+                    }
                 }
-            }
-            if ui.button("Add Folder").clicked() {
-                if let Some(folder_path) = FileDialog::new()
-                    .pick_folder() {
-                    self.add_folder_songs(&folder_path);
+                if ui.add(egui::Button::new(RichText::new("Add Folder").font(FontId::proportional(16.0)))).clicked() {
+                    if let Some(folder_path) = FileDialog::new().pick_folder() {
+                        self.add_folder_songs(&folder_path);
+                    }
                 }
-            }
-            if ui.button("Remove Selected").clicked() {
-                self.remove_selected_songs();
-            }
-            if ui.button("Clear All").clicked() {
-                self.clear_all_songs();
-            }
+                if ui.add(egui::Button::new(RichText::new("Remove Selected").font(FontId::proportional(16.0)))).clicked() {
+                    self.remove_selected_songs();
+                }
+                if ui.add(egui::Button::new(RichText::new("Clear All").font(FontId::proportional(16.0)))).clicked() {
+                    self.clear_all_songs();
+                }
+            });
         });
     }
 
     fn render_controls_panel(&mut self, ui: &mut Ui, audio_manager: Arc<Mutex<AudioManager>>) {
-        ui.heading("Controls");
-        ui.separator();
-        ui.horizontal(|ui| {
-            if ui.button("⏮ Prev").clicked() {
-                self.handle_previous(audio_manager.clone());
-            }
-            
-            // Play/Pause button with proper state
-            let button_text = if self.is_playing && !self.is_paused {
-                "⏸ Pause"
-            } else {
-                "▶ Play"
-            };
-            
-            if ui.button(button_text).clicked() {
-                self.handle_play_pause(audio_manager.clone());
-            }
-            
-            if ui.button("⏭ Next").clicked() {
-                self.handle_next(audio_manager.clone());
-            }
-            if ui.button("⏹ Stop").clicked() {
-                self.handle_stop(audio_manager.clone());
-            }
-        });
-        ui.separator();
-        ui.label("Volume:");
-        let volume_changed = ui.add(egui::Slider::new(&mut self.volume, 0.0..=1.0).text("Volume")).changed();
-        if volume_changed {
-            self.handle_volume_change(audio_manager.clone());
-        }
-        ui.separator();
-        ui.label("Now Playing:");
-        if let Some(idx) = self.selected_song_index {
-            let song = &self.demo_songs[idx];
-            ui.label(format!("{} - {}", song.title, song.artist));
-            
-            // Progress timer
+        ui.group(|ui| {
+            ui.set_width(ui.available_width());
+            ui.heading(RichText::new("Controls").font(FontId::proportional(24.0)).color(Color32::WHITE));
             ui.separator();
-            ui.label("Progress:");
-            let elapsed = if self.is_playing && !self.is_paused {
-                if let Some(start) = self.playback_start {
-                    start.elapsed()
+            ui.horizontal(|ui| {
+                let prev = ui.add(egui::Button::new(RichText::new("⏮ Prev").font(FontId::proportional(16.0))));
+                let play_pause_label = if self.is_playing && !self.is_paused {
+                    "⏸ Pause"
+                } else {
+                    "▶ Play"
+                };
+                let play_pause = ui.add(egui::Button::new(RichText::new(play_pause_label).font(FontId::proportional(16.0))));
+                let next = ui.add(egui::Button::new(RichText::new("⏭ Next").font(FontId::proportional(16.0))));
+                let stop = ui.add(egui::Button::new(RichText::new("⏹ Stop").font(FontId::proportional(16.0))));
+                if prev.clicked() { self.handle_previous(audio_manager.clone()); }
+                if play_pause.clicked() { self.handle_play_pause(audio_manager.clone()); }
+                if next.clicked() { self.handle_next(audio_manager.clone()); }
+                if stop.clicked() { self.handle_stop(audio_manager.clone()); }
+            });
+            ui.add_space(8.0);
+            ui.label(RichText::new("Volume:").font(FontId::proportional(16.0)));
+            let volume_slider = ui.add(egui::Slider::new(&mut self.volume, 0.0..=1.0).text("Volume"));
+            if volume_slider.changed() {
+                self.handle_volume_change(audio_manager.clone());
+            }
+            ui.separator();
+            ui.label(RichText::new("Now Playing:").font(FontId::proportional(16.0)).color(Color32::from_rgb(80, 180, 255)));
+            if let Some(idx) = self.selected_song_index {
+                let song = &self.demo_songs[idx];
+                ui.label(RichText::new(format!("{} - {}", song.title, song.artist)).font(FontId::proportional(18.0)).color(Color32::WHITE));
+                ui.separator();
+                ui.label(RichText::new("Progress:").font(FontId::proportional(16.0)));
+                let elapsed = if self.is_playing && !self.is_paused {
+                    if let Some(start) = self.playback_start {
+                        start.elapsed()
+                    } else {
+                        std::time::Duration::from_secs(0)
+                    }
+                } else if self.is_paused {
+                    self.paused_at.unwrap_or(std::time::Duration::from_secs(0))
                 } else {
                     std::time::Duration::from_secs(0)
-                }
-            } else if self.is_paused {
-                self.paused_at.unwrap_or(std::time::Duration::from_secs(0))
-            } else {
-                std::time::Duration::from_secs(0)
-            };
-            let current_secs = elapsed.as_secs();
-            let current_mins = current_secs / 60;
-            let current_secs_remainder = current_secs % 60;
-            if let Some(total_duration) = self.total_duration.or(self.total_duration) {
-                let total_secs = total_duration.as_secs();
+                };
+                let current_secs = elapsed.as_secs();
+                let current_mins = current_secs / 60;
+                let current_secs_remainder = current_secs % 60;
+                let total_secs = self.total_duration.map(|d| d.as_secs()).unwrap_or(0);
                 let total_mins = total_secs / 60;
                 let total_secs_remainder = total_secs % 60;
-                ui.label(format!("{:02}:{:02} / {:02}:{:02}", 
-                    current_mins, current_secs_remainder, 
-                    total_mins, total_secs_remainder));
+                // Graphical progress bar
+                if let Some(total) = self.total_duration {
+                    let frac = (elapsed.as_secs_f32() / total.as_secs_f32()).min(1.0);
+                    ui.add(egui::ProgressBar::new(frac).desired_width(200.0).show_percentage());
+                }
+                ui.label(RichText::new(format!("{:02}:{:02} / {:02}:{:02}", current_mins, current_secs_remainder, total_mins, total_secs_remainder)).font(FontId::proportional(16.0)).color(Color32::WHITE));
             } else {
-                ui.label(format!("{:02}:{:02} / --:--", current_mins, current_secs_remainder));
+                ui.label(RichText::new("No song selected").font(FontId::proportional(16.0)).color(Color32::GRAY));
             }
-        } else {
-            ui.label("No song selected");
-        }
-        
-        // Show playback status
-        ui.separator();
-        let status = if self.is_playing && !self.is_paused {
-            "▶ Playing"
-        } else if self.is_paused {
-            "⏸ Paused"
-        } else {
-            "⏹ Stopped"
-        };
-        ui.label(format!("Status: {}", status));
+            ui.separator();
+            let status = if self.is_playing && !self.is_paused {
+                "▶ Playing"
+            } else if self.is_paused {
+                "⏸ Paused"
+            } else {
+                "⏹ Stopped"
+            };
+            ui.label(RichText::new(format!("Status: {}", status)).font(FontId::proportional(16.0)).color(Color32::from_rgb(80, 180, 255)));
+        });
     }
 
     fn handle_play_pause(&mut self, audio_manager: Arc<Mutex<AudioManager>>) {
