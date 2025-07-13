@@ -4,6 +4,11 @@ use std::fs::File;
 use std::io::BufReader;
 use std::time::Duration;
 use tracing::info;
+use symphonia::core::codecs::CODEC_TYPE_NULL;
+use symphonia::core::formats::FormatOptions;
+use symphonia::core::io::MediaSourceStream;
+use symphonia::core::meta::MetadataOptions;
+use symphonia::default::get_probe;
 
 pub struct AudioManager {
     _stream: OutputStream,
@@ -12,6 +17,7 @@ pub struct AudioManager {
     current_file: Option<String>,
     is_playing: bool,
     is_paused: bool,
+    current_duration: Option<Duration>,
 }
 
 impl AudioManager {
@@ -25,6 +31,7 @@ impl AudioManager {
             current_file: None,
             is_playing: false,
             is_paused: false,
+            current_duration: None,
         }
     }
 
@@ -50,6 +57,7 @@ impl AudioManager {
         self.current_file = Some(file_path.to_string());
         self.is_playing = true;
         self.is_paused = false;
+        self.current_duration = Self::probe_duration(file_path);
         
         Ok(())
     }
@@ -80,6 +88,7 @@ impl AudioManager {
         self.current_file = None;
         self.is_playing = false;
         self.is_paused = false;
+        self.current_duration = None;
         info!("Audio stopped");
     }
 
@@ -107,6 +116,37 @@ impl AudioManager {
         } else {
             Duration::ZERO
         }
+    }
+
+    pub fn get_current_position(&self) -> Duration {
+        if let Some(sink) = &self.sink {
+            // Get the current playback position
+            let samples_played = sink.len() as f32;
+            Duration::from_secs_f32(samples_played / 44100.0)
+        } else {
+            Duration::ZERO
+        }
+    }
+
+    pub fn get_total_duration(&self) -> Option<Duration> {
+        self.current_duration
+    }
+
+    fn probe_duration(file_path: &str) -> Option<Duration> {
+        let file = File::open(file_path).ok()?;
+        let mss = MediaSourceStream::new(Box::new(file), Default::default());
+        let probed = get_probe().format(
+            &Default::default(),
+            mss,
+            &FormatOptions::default(),
+            &MetadataOptions::default(),
+        ).ok()?;
+        let format = probed.format;
+        let track = format.tracks().iter().find(|t| t.codec_params.codec != CODEC_TYPE_NULL)?;
+        let duration = track.codec_params.n_frames.and_then(|frames| {
+            track.codec_params.sample_rate.map(|rate| Duration::from_secs_f64(frames as f64 / rate as f64))
+        });
+        duration
     }
 
     pub fn is_finished(&self) -> bool {

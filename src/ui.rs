@@ -9,11 +9,14 @@ use walkdir::WalkDir;
 pub struct MusicPlayerUI {
     volume: f32,
     selected_song_index: Option<usize>,
-    // Remove unused fields
     is_playing: bool,
     is_paused: bool,
     demo_songs: Vec<Song>,
-    selected_songs: Vec<usize>, // Multiple selection support
+    selected_songs: Vec<usize>,
+    current_position: std::time::Duration,
+    total_duration: Option<std::time::Duration>,
+    playback_start: Option<std::time::Instant>,
+    paused_at: Option<std::time::Duration>,
 }
 
 impl MusicPlayerUI {
@@ -23,8 +26,12 @@ impl MusicPlayerUI {
             selected_song_index: None,
             is_playing: false,
             is_paused: false,
-            demo_songs: Vec::new(), // Start with empty playlist
+            demo_songs: Vec::new(),
             selected_songs: Vec::new(),
+            current_position: std::time::Duration::from_secs(0),
+            total_duration: None,
+            playback_start: None,
+            paused_at: None,
         }
     }
 
@@ -49,6 +56,12 @@ impl MusicPlayerUI {
         if let Ok(manager) = audio_manager.try_lock() {
             self.is_playing = manager.is_playing();
             self.is_paused = manager.is_paused();
+            
+            // Update progress timer
+            if self.is_playing && !self.is_paused {
+                self.current_position = manager.get_current_position();
+                self.total_duration = manager.get_total_duration();
+            }
             
             // Check if current song has finished and auto-advance
             if self.is_playing && !self.is_paused && manager.is_finished() {
@@ -156,6 +169,34 @@ impl MusicPlayerUI {
         if let Some(idx) = self.selected_song_index {
             let song = &self.demo_songs[idx];
             ui.label(format!("{} - {}", song.title, song.artist));
+            
+            // Progress timer
+            ui.separator();
+            ui.label("Progress:");
+            let elapsed = if self.is_playing && !self.is_paused {
+                if let Some(start) = self.playback_start {
+                    start.elapsed()
+                } else {
+                    std::time::Duration::from_secs(0)
+                }
+            } else if self.is_paused {
+                self.paused_at.unwrap_or(std::time::Duration::from_secs(0))
+            } else {
+                std::time::Duration::from_secs(0)
+            };
+            let current_secs = elapsed.as_secs();
+            let current_mins = current_secs / 60;
+            let current_secs_remainder = current_secs % 60;
+            if let Some(total_duration) = self.total_duration.or(self.total_duration) {
+                let total_secs = total_duration.as_secs();
+                let total_mins = total_secs / 60;
+                let total_secs_remainder = total_secs % 60;
+                ui.label(format!("{:02}:{:02} / {:02}:{:02}", 
+                    current_mins, current_secs_remainder, 
+                    total_mins, total_secs_remainder));
+            } else {
+                ui.label(format!("{:02}:{:02} / --:--", current_mins, current_secs_remainder));
+            }
         } else {
             ui.label("No song selected");
         }
@@ -179,11 +220,18 @@ impl MusicPlayerUI {
                 manager.pause();
                 self.is_paused = true;
                 self.is_playing = false;
+                if let Some(start) = self.playback_start {
+                    self.paused_at = Some(start.elapsed());
+                }
             } else if self.is_paused {
                 // Currently paused, so resume
                 manager.resume();
                 self.is_playing = true;
                 self.is_paused = false;
+                if let Some(paused) = self.paused_at {
+                    self.playback_start = Some(std::time::Instant::now() - paused);
+                }
+                self.paused_at = None;
             } else {
                 // Not playing, so start playing selected song
                 if let Some(idx) = self.selected_song_index {
@@ -193,6 +241,8 @@ impl MusicPlayerUI {
                     } else {
                         self.is_playing = true;
                         self.is_paused = false;
+                        self.playback_start = Some(std::time::Instant::now());
+                        self.paused_at = None;
                     }
                 }
             }
@@ -204,6 +254,10 @@ impl MusicPlayerUI {
             manager.stop();
             self.is_playing = false;
             self.is_paused = false;
+            self.current_position = std::time::Duration::from_secs(0);
+            self.total_duration = None;
+            self.playback_start = None;
+            self.paused_at = None;
         }
     }
 
@@ -270,6 +324,10 @@ impl MusicPlayerUI {
                 } else {
                     self.is_playing = true;
                     self.is_paused = false;
+                    self.playback_start = Some(std::time::Instant::now());
+                    self.paused_at = None;
+                    self.current_position = std::time::Duration::from_secs(0);
+                    self.total_duration = manager.get_total_duration();
                 }
             }
         }
@@ -300,6 +358,10 @@ impl MusicPlayerUI {
                 manager.stop();
                 self.is_playing = false;
                 self.is_paused = false;
+                self.current_position = std::time::Duration::from_secs(0);
+                self.total_duration = None;
+                self.playback_start = None;
+                self.paused_at = None;
             }
         }
     }
