@@ -27,8 +27,8 @@ A modern, cross-platform music player built with Rust, featuring a clean GUI and
 1. **Clone the repository**:
 
    ```bash
-   git clone <repository-url>
-   cd SDLMusic
+   git clone https://github.com/Dagmawi7Asfaw/Music_Player.git
+   cd Music_Player
    ```
 
 2. **Build the project**:
