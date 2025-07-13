@@ -17,6 +17,8 @@ pub struct MusicPlayerUI {
     total_duration: Option<std::time::Duration>,
     playback_start: Option<std::time::Instant>,
     paused_at: Option<std::time::Duration>,
+    pending_next: bool,
+    pending_next_time: Option<std::time::Instant>,
 }
 
 impl MusicPlayerUI {
@@ -32,6 +34,8 @@ impl MusicPlayerUI {
             total_duration: None,
             playback_start: None,
             paused_at: None,
+            pending_next: false,
+            pending_next_time: None,
         }
     }
 
@@ -75,17 +79,27 @@ impl MusicPlayerUI {
     }
 
     fn update_playback_state(&mut self, audio_manager: &Arc<Mutex<AudioManager>>) {
+        if self.pending_next {
+            if let Some(start) = self.pending_next_time {
+                if start.elapsed().as_secs_f32() >= 2.0 {
+                    self.pending_next = false;
+                    self.pending_next_time = None;
+                    self.auto_advance_to_next_song(audio_manager.clone());
+                }
+            }
+            return;
+        }
         if let Ok(manager) = audio_manager.try_lock() {
             self.is_playing = manager.is_playing();
             self.is_paused = manager.is_paused();
 
-            // Check if current song has finished and auto-advance
+            // Check if current song has finished and set pending_next
             if self.is_playing && !self.is_paused && manager.is_finished() {
-                // Clamp timer to total duration
                 if let Some(total) = self.total_duration {
                     self.current_position = total;
                 }
-                self.auto_advance_to_next_song(audio_manager.clone());
+                self.pending_next = true;
+                self.pending_next_time = Some(std::time::Instant::now());
                 return;
             }
 
@@ -192,29 +206,36 @@ impl MusicPlayerUI {
                 ui.label(RichText::new(format!("{} - {}", song.title, song.artist)).font(FontId::proportional(18.0)).color(Color32::WHITE));
                 ui.separator();
                 ui.label(RichText::new("Progress:").font(FontId::proportional(16.0)));
-                let elapsed = if self.is_playing && !self.is_paused {
-                    if let Some(start) = self.playback_start {
-                        start.elapsed()
+                let (elapsed, frac) = if self.pending_next {
+                    let total = self.total_duration.unwrap_or(std::time::Duration::from_secs(1));
+                    (total, 1.0)
+                } else {
+                    let elapsed = if self.is_playing && !self.is_paused {
+                        if let Some(start) = self.playback_start {
+                            start.elapsed()
+                        } else {
+                            std::time::Duration::from_secs(0)
+                        }
+                    } else if self.is_paused {
+                        self.paused_at.unwrap_or(std::time::Duration::from_secs(0))
                     } else {
                         std::time::Duration::from_secs(0)
+                    };
+                    let mut elapsed_secs = elapsed.as_secs_f32();
+                    let mut frac = 0.0;
+                    if let Some(total) = self.total_duration {
+                        let total_secs = total.as_secs_f32();
+                        if elapsed_secs > total_secs {
+                            elapsed_secs = total_secs;
+                        }
+                        frac = (elapsed_secs / total_secs).min(1.0);
                     }
-                } else if self.is_paused {
-                    self.paused_at.unwrap_or(std::time::Duration::from_secs(0))
-                } else {
-                    std::time::Duration::from_secs(0)
+                    (std::time::Duration::from_secs_f32(elapsed_secs), frac)
                 };
-                // Graphical progress bar
-                let mut elapsed_secs = elapsed.as_secs_f32();
-                let mut frac = 0.0;
-                if let Some(total) = self.total_duration {
-                    let total_secs = total.as_secs_f32();
-                    if elapsed_secs > total_secs {
-                        elapsed_secs = total_secs;
-                    }
-                    frac = (elapsed_secs / total_secs).min(1.0);
+                if self.total_duration.is_some() {
                     ui.add(egui::ProgressBar::new(frac).desired_width(200.0).show_percentage());
                 }
-                let display_secs = elapsed_secs as u64;
+                let display_secs = elapsed.as_secs() as u64;
                 let current_mins = display_secs / 60;
                 let current_secs_remainder = display_secs % 60;
                 let total_secs = self.total_duration.map(|d| d.as_secs()).unwrap_or(0);
@@ -225,7 +246,9 @@ impl MusicPlayerUI {
                 ui.label(RichText::new("No song selected").font(FontId::proportional(16.0)).color(Color32::GRAY));
             }
             ui.separator();
-            let status = if self.is_playing && !self.is_paused {
+            let status = if self.pending_next {
+                "⏳ Waiting..."
+            } else if self.is_playing && !self.is_paused {
                 "▶ Playing"
             } else if self.is_paused {
                 "⏸ Paused"
