@@ -78,16 +78,21 @@ impl MusicPlayerUI {
         if let Ok(manager) = audio_manager.try_lock() {
             self.is_playing = manager.is_playing();
             self.is_paused = manager.is_paused();
-            
+
+            // Check if current song has finished and auto-advance
+            if self.is_playing && !self.is_paused && manager.is_finished() {
+                // Clamp timer to total duration
+                if let Some(total) = self.total_duration {
+                    self.current_position = total;
+                }
+                self.auto_advance_to_next_song(audio_manager.clone());
+                return;
+            }
+
             // Update progress timer
             if self.is_playing && !self.is_paused {
                 self.current_position = manager.get_current_position();
                 self.total_duration = manager.get_total_duration();
-            }
-            
-            // Check if current song has finished and auto-advance
-            if self.is_playing && !self.is_paused && manager.is_finished() {
-                self.auto_advance_to_next_song(audio_manager.clone());
             }
         }
     }
@@ -198,17 +203,23 @@ impl MusicPlayerUI {
                 } else {
                     std::time::Duration::from_secs(0)
                 };
-                let current_secs = elapsed.as_secs();
-                let current_mins = current_secs / 60;
-                let current_secs_remainder = current_secs % 60;
+                // Graphical progress bar
+                let mut elapsed_secs = elapsed.as_secs_f32();
+                let mut frac = 0.0;
+                if let Some(total) = self.total_duration {
+                    let total_secs = total.as_secs_f32();
+                    if elapsed_secs > total_secs {
+                        elapsed_secs = total_secs;
+                    }
+                    frac = (elapsed_secs / total_secs).min(1.0);
+                    ui.add(egui::ProgressBar::new(frac).desired_width(200.0).show_percentage());
+                }
+                let display_secs = elapsed_secs as u64;
+                let current_mins = display_secs / 60;
+                let current_secs_remainder = display_secs % 60;
                 let total_secs = self.total_duration.map(|d| d.as_secs()).unwrap_or(0);
                 let total_mins = total_secs / 60;
                 let total_secs_remainder = total_secs % 60;
-                // Graphical progress bar
-                if let Some(total) = self.total_duration {
-                    let frac = (elapsed.as_secs_f32() / total.as_secs_f32()).min(1.0);
-                    ui.add(egui::ProgressBar::new(frac).desired_width(200.0).show_percentage());
-                }
                 ui.label(RichText::new(format!("{:02}:{:02} / {:02}:{:02}", current_mins, current_secs_remainder, total_mins, total_secs_remainder)).font(FontId::proportional(16.0)).color(Color32::WHITE));
             } else {
                 ui.label(RichText::new("No song selected").font(FontId::proportional(16.0)).color(Color32::GRAY));
